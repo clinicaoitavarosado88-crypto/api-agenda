@@ -728,18 +728,21 @@ curl -H "X-API-Key: clk_..." \
 GET /procedimentos/valores
 ```
 
-Retorna os valores negociados dos procedimentos para um convênio específico, buscando da **tabela de negociação** do convênio. Os valores são retornados por forma de pagamento (dinheiro, pix, débito, crédito à vista, crédito parcelado) quando disponíveis.
+Retorna os valores dos procedimentos da **tabela de negociação** do convênio particular. Os valores já vêm definidos por forma de pagamento (dinheiro, pix, cartão débito, cartão à vista, cartão parcelado).
 
-Se CPF informado, calcula os descontos do Cartão de Desconto em cima dos valores negociados.
+A resposta possui duas seções:
+- **`valores_sem_plano`** — valores para pacientes **SEM** Cartão de Desconto
+- **`cartao_desconto.valores`** — valores para pacientes **COM** Cartão de Desconto (já definidos na tabela, sem cálculo)
+
+Se CPF informado, verifica se o paciente tem Cartão de Desconto ativo e se o plano é aceito para o procedimento.
 
 > **Importante:** Use o `convenio_id` do convênio **Particular** da unidade desejada. Valores de plano de saúde **NÃO** devem ser consultados por este endpoint.
 
 **Permissão:** `valores.read`
 
-**Hierarquia de busca de valor:**
-1. `convenio_procedimentos` (tabela de negociação) — inclui `payment_structure` com valores por forma de pagamento
-2. `tabelas_negociacao` (vigentes) — calcula `valor_negociado` baseado no tipo (CBHPM, AMB, etc.)
-3. `Procedure.value` — fallback quando não há tabela de negociação
+**Fonte dos valores:**
+1. `convenio_procedimentos` (tabela de negociação) — campo `payment_structure` com valores por forma de pagamento nas seções `sem_plano` e `planos`
+2. `Procedure.value` — fallback quando o procedimento não está na tabela de negociação
 
 **Parâmetros de Query:**
 
@@ -767,12 +770,12 @@ curl -H "X-API-Key: clk_..." \
         "codigo_tuss": "40901017",
         "valor_negociado": 150.00,
         "origem_valor": "tabela_negociacao",
-        "valores_por_forma_pagamento": {
+        "valores_sem_plano": {
           "dinheiro": 150.00,
           "pix": 150.00,
-          "debito": 160.00,
-          "credito_avista": 160.00,
-          "credito_parcelado": 170.00
+          "cartao_debito": 160.00,
+          "cartao_avista": 160.00,
+          "cartao_parcelado": 170.00
         },
         "cartao_desconto": null
       },
@@ -782,12 +785,12 @@ curl -H "X-API-Key: clk_..." \
         "codigo_tuss": "40304361",
         "valor_negociado": 25.00,
         "origem_valor": "tabela_negociacao",
-        "valores_por_forma_pagamento": {
+        "valores_sem_plano": {
           "dinheiro": 25.00,
           "pix": 25.00,
-          "debito": 25.00,
-          "credito_avista": 25.00,
-          "credito_parcelado": 25.00
+          "cartao_debito": 25.00,
+          "cartao_avista": 25.00,
+          "cartao_parcelado": 25.00
         },
         "cartao_desconto": null
       }
@@ -803,7 +806,7 @@ curl -H "X-API-Key: clk_..." \
   "https://seu-dominio/api/v1/external/procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910"
 ```
 
-**Resposta (paciente com cartão ativo):**
+**Resposta (paciente com cartão ativo e plano aceito):**
 ```json
 {
   "sucesso": true,
@@ -815,23 +818,24 @@ curl -H "X-API-Key: clk_..." \
         "codigo_tuss": "40901017",
         "valor_negociado": 150.00,
         "origem_valor": "tabela_negociacao",
-        "valores_por_forma_pagamento": {
+        "valores_sem_plano": {
           "dinheiro": 150.00,
           "pix": 150.00,
-          "debito": 160.00,
-          "credito_avista": 160.00,
-          "credito_parcelado": 170.00
+          "cartao_debito": 160.00,
+          "cartao_avista": 160.00,
+          "cartao_parcelado": 170.00
         },
         "cartao_desconto": {
           "tem_cartao": true,
           "status": "adimplente",
           "plano": "Individual",
+          "plano_aceito": true,
           "valores": {
-            "dinheiro": { "desconto_percentual": 30.0, "valor_final": 105.00 },
-            "pix": { "desconto_percentual": 30.0, "valor_final": 105.00 },
-            "debito": { "desconto_percentual": 20.0, "valor_final": 128.00 },
-            "credito_avista": { "desconto_percentual": 15.0, "valor_final": 136.00 },
-            "credito_parcelado": { "desconto_percentual": 10.0, "valor_final": 153.00 }
+            "dinheiro": 100.00,
+            "pix": 100.00,
+            "cartao_debito": 110.00,
+            "cartao_avista": 115.00,
+            "cartao_parcelado": 120.00
           }
         }
       }
@@ -841,7 +845,41 @@ curl -H "X-API-Key: clk_..." \
 }
 ```
 
-> **Nota:** O desconto do cartão é aplicado sobre o `valor_por_forma_pagamento` de cada forma, não sobre o `valor_negociado` base. Exemplo: débito R$160 com 20% de desconto = R$128.
+> **Nota:** Os valores em `cartao_desconto.valores` são pré-definidos na tabela de negociação (seção "Planos"), **NÃO** são calculados a partir de percentuais. Eles são cadastrados pelo administrador junto com os valores `sem_plano`.
+
+**Resposta (paciente com cartão, mas plano NÃO aceito para o procedimento):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "procedimentos": [
+      {
+        "id": 10,
+        "nome": "Ultrassonografia Abdominal",
+        "codigo_tuss": "40901017",
+        "valor_negociado": 150.00,
+        "origem_valor": "tabela_negociacao",
+        "valores_sem_plano": {
+          "dinheiro": 150.00,
+          "pix": 150.00,
+          "cartao_debito": 160.00,
+          "cartao_avista": 160.00,
+          "cartao_parcelado": 170.00
+        },
+        "cartao_desconto": {
+          "tem_cartao": true,
+          "status": "adimplente",
+          "plano": "Individual",
+          "plano_aceito": false,
+          "valores": null,
+          "mensagem": "Plano do cartão não aceito para este procedimento"
+        }
+      }
+    ]
+  },
+  "mensagem": "Valores consultados com sucesso"
+}
+```
 
 **Resposta (paciente sem cartão):**
 ```json
@@ -855,17 +893,18 @@ curl -H "X-API-Key: clk_..." \
         "codigo_tuss": "40901017",
         "valor_negociado": 150.00,
         "origem_valor": "tabela_negociacao",
-        "valores_por_forma_pagamento": {
+        "valores_sem_plano": {
           "dinheiro": 150.00,
           "pix": 150.00,
-          "debito": 160.00,
-          "credito_avista": 160.00,
-          "credito_parcelado": 170.00
+          "cartao_debito": 160.00,
+          "cartao_avista": 160.00,
+          "cartao_parcelado": 170.00
         },
         "cartao_desconto": {
           "tem_cartao": false,
           "status": "nao_encontrado",
           "plano": null,
+          "plano_aceito": false,
           "valores": null,
           "mensagem": "Paciente não possui Cartão de Desconto"
         }
@@ -916,18 +955,14 @@ curl -H "X-API-Key: clk_..." \
     "status": "adimplente",
     "plano": "Individual",
     "pode_usar_cartao": true,
-    "mensagem": "Paciente adimplente. Pode usar Cartão de Desconto.",
-    "descontos": {
-      "dinheiro": 30.0,
-      "pix": 30.0,
-      "debito": 20.0,
-      "credito_avista": 15.0,
-      "credito_parcelado": 10.0
-    }
+    "tipo_vinculo": "titular",
+    "mensagem": "Paciente adimplente. Pode usar Cartão de Desconto."
   },
   "mensagem": "Verificação realizada"
 }
 ```
+
+> **Nota:** Este endpoint apenas verifica o **status** do cartão. Os **valores com desconto** são retornados pelo endpoint `GET /procedimentos/valores` (na seção `cartao_desconto.valores`), pois os valores variam por procedimento e já estão definidos na tabela de negociação.
 
 **Resposta (paciente inadimplente):**
 ```json
@@ -938,6 +973,7 @@ curl -H "X-API-Key: clk_..." \
     "status": "inadimplente",
     "plano": "Individual",
     "pode_usar_cartao": false,
+    "tipo_vinculo": "titular",
     "mensagem": "Paciente inadimplente. Regularizar situação para usar Cartão."
   },
   "mensagem": "Verificação realizada"
@@ -953,6 +989,7 @@ curl -H "X-API-Key: clk_..." \
     "status": "nao_encontrado",
     "plano": null,
     "pode_usar_cartao": false,
+    "tipo_vinculo": null,
     "mensagem": "Paciente não possui Cartão de Desconto"
   },
   "mensagem": "Verificação realizada"
@@ -1352,10 +1389,12 @@ resp = requests.get(f"{BASE_URL}/procedimentos/valores", headers=HEADERS, params
 })
 valores = resp.json()["dados"]["procedimentos"]
 for proc in valores:
-    print(f"{proc['nome']}: R$ {proc['valor_negociado']}")
-    if proc["cartao_desconto"] and proc["cartao_desconto"]["tem_cartao"]:
-        pix = proc["cartao_desconto"]["valores"]["pix"]
-        print(f"  Com cartão (PIX): R$ {pix['valor_final']} ({pix['desconto_percentual']}% off)")
+    valor_pix = proc["valores_sem_plano"]["pix"]
+    print(f"{proc['nome']}: R$ {valor_pix} (PIX sem plano)")
+    cartao = proc["cartao_desconto"]
+    if cartao and cartao.get("plano_aceito") and cartao.get("valores"):
+        valor_pix_cartao = cartao["valores"]["pix"]
+        print(f"  Com cartão (PIX): R$ {valor_pix_cartao}")
 
 # 4. Consultar disponibilidade
 resp = requests.get(f"{BASE_URL}/agendas/1/disponibilidade",
