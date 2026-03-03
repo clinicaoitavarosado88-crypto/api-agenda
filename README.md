@@ -28,9 +28,9 @@ API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros
 | Item | Valor |
 |------|-------|
 | **Email** | `integracao@clinica.com` |
-| **Senha** | `Integracao@2026` |
+| **Senha** | `123456` |
 | **Perfil** | Integração |
-| **Acesso** | Apenas módulo de agenda (dashboard, agendamentos, pacientes visualização) |
+| **Acesso** | Apenas módulo de agenda (agendamentos e pacientes) |
 
 **Teste rápido:**
 ```bash
