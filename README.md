@@ -21,6 +21,8 @@ API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros
   - [Pacientes](#pacientes)
   - [Agendamentos](#agendamentos)
   - [Convênios](#convênios)
+  - [Valores e Cartão de Desconto](#valores-e-cartão-de-desconto)
+  - [Ordens de Serviço](#ordens-de-serviço)
 - [Webhooks](#webhooks)
 - [Permissões](#permissões)
 - [Códigos de Erro](#códigos-de-erro)
@@ -718,6 +720,417 @@ curl -H "X-API-Key: clk_..." \
 
 ---
 
+### Valores e Cartão de Desconto
+
+#### Consultar Valores de Procedimentos
+
+```
+GET /procedimentos/valores
+```
+
+Retorna os valores negociados dos procedimentos para um convênio específico, buscando da **tabela de negociação** do convênio. Os valores são retornados por forma de pagamento (dinheiro, pix, débito, crédito à vista, crédito parcelado) quando disponíveis.
+
+Se CPF informado, calcula os descontos do Cartão de Desconto em cima dos valores negociados.
+
+> **Importante:** Use o `convenio_id` do convênio **Particular** da unidade desejada. Valores de plano de saúde **NÃO** devem ser consultados por este endpoint.
+
+**Permissão:** `valores.read`
+
+**Hierarquia de busca de valor:**
+1. `convenio_procedimentos` (tabela de negociação) — inclui `payment_structure` com valores por forma de pagamento
+2. `tabelas_negociacao` (vigentes) — calcula `valor_negociado` baseado no tipo (CBHPM, AMB, etc.)
+3. `Procedure.value` — fallback quando não há tabela de negociação
+
+**Parâmetros de Query:**
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|-----------|------|-------------|-----------|
+| `procedure_ids[]` | integer[] | Sim | IDs dos procedimentos (máx 50) |
+| `convenio_id` | integer | Sim | ID do convênio (particular da unidade) |
+| `cpf` | string | Não | CPF do paciente para verificar cartão de desconto |
+
+**Exemplo — Somente valores negociados:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "https://seu-dominio/api/v1/external/procedimentos/valores?procedure_ids[]=10&procedure_ids[]=15&convenio_id=2"
+```
+
+**Resposta:**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "procedimentos": [
+      {
+        "id": 10,
+        "nome": "Ultrassonografia Abdominal",
+        "codigo_tuss": "40901017",
+        "valor_negociado": 150.00,
+        "origem_valor": "tabela_negociacao",
+        "valores_por_forma_pagamento": {
+          "dinheiro": 150.00,
+          "pix": 150.00,
+          "debito": 160.00,
+          "credito_avista": 160.00,
+          "credito_parcelado": 170.00
+        },
+        "cartao_desconto": null
+      },
+      {
+        "id": 15,
+        "nome": "Hemograma Completo",
+        "codigo_tuss": "40304361",
+        "valor_negociado": 25.00,
+        "origem_valor": "tabela_negociacao",
+        "valores_por_forma_pagamento": {
+          "dinheiro": 25.00,
+          "pix": 25.00,
+          "debito": 25.00,
+          "credito_avista": 25.00,
+          "credito_parcelado": 25.00
+        },
+        "cartao_desconto": null
+      }
+    ]
+  },
+  "mensagem": "Valores consultados com sucesso"
+}
+```
+
+**Exemplo — Com cartão de desconto:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "https://seu-dominio/api/v1/external/procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910"
+```
+
+**Resposta (paciente com cartão ativo):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "procedimentos": [
+      {
+        "id": 10,
+        "nome": "Ultrassonografia Abdominal",
+        "codigo_tuss": "40901017",
+        "valor_negociado": 150.00,
+        "origem_valor": "tabela_negociacao",
+        "valores_por_forma_pagamento": {
+          "dinheiro": 150.00,
+          "pix": 150.00,
+          "debito": 160.00,
+          "credito_avista": 160.00,
+          "credito_parcelado": 170.00
+        },
+        "cartao_desconto": {
+          "tem_cartao": true,
+          "status": "adimplente",
+          "plano": "Individual",
+          "valores": {
+            "dinheiro": { "desconto_percentual": 30.0, "valor_final": 105.00 },
+            "pix": { "desconto_percentual": 30.0, "valor_final": 105.00 },
+            "debito": { "desconto_percentual": 20.0, "valor_final": 128.00 },
+            "credito_avista": { "desconto_percentual": 15.0, "valor_final": 136.00 },
+            "credito_parcelado": { "desconto_percentual": 10.0, "valor_final": 153.00 }
+          }
+        }
+      }
+    ]
+  },
+  "mensagem": "Valores consultados com sucesso"
+}
+```
+
+> **Nota:** O desconto do cartão é aplicado sobre o `valor_por_forma_pagamento` de cada forma, não sobre o `valor_negociado` base. Exemplo: débito R$160 com 20% de desconto = R$128.
+
+**Resposta (paciente sem cartão):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "procedimentos": [
+      {
+        "id": 10,
+        "nome": "Ultrassonografia Abdominal",
+        "codigo_tuss": "40901017",
+        "valor_negociado": 150.00,
+        "origem_valor": "tabela_negociacao",
+        "valores_por_forma_pagamento": {
+          "dinheiro": 150.00,
+          "pix": 150.00,
+          "debito": 160.00,
+          "credito_avista": 160.00,
+          "credito_parcelado": 170.00
+        },
+        "cartao_desconto": {
+          "tem_cartao": false,
+          "status": "nao_encontrado",
+          "plano": null,
+          "valores": null,
+          "mensagem": "Paciente não possui Cartão de Desconto"
+        }
+      }
+    ]
+  },
+  "mensagem": "Valores consultados com sucesso"
+}
+
+**Campo `origem_valor`:**
+
+| Valor | Significado |
+|-------|-------------|
+| `tabela_negociacao` | Valor encontrado na tabela de negociação do convênio |
+| `tabela_procedimento` | Fallback: valor padrão do procedimento (sem tabela de negociação) |
+```
+
+---
+
+#### Verificar Cartão de Desconto
+
+```
+GET /cartao-desconto/verificar
+```
+
+Verifica o status do cartão de desconto de um paciente por CPF. Consulta base local e API externa (cartaooitavarosado.com.br).
+
+**Permissão:** `valores.read`
+
+**Parâmetros de Query:**
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|-----------|------|-------------|-----------|
+| `cpf` | string | Sim | CPF do paciente |
+
+**Exemplo:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "https://seu-dominio/api/v1/external/cartao-desconto/verificar?cpf=12345678910"
+```
+
+**Resposta (paciente com cartão ativo):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "tem_cartao": true,
+    "status": "adimplente",
+    "plano": "Individual",
+    "pode_usar_cartao": true,
+    "mensagem": "Paciente adimplente. Pode usar Cartão de Desconto.",
+    "descontos": {
+      "dinheiro": 30.0,
+      "pix": 30.0,
+      "debito": 20.0,
+      "credito_avista": 15.0,
+      "credito_parcelado": 10.0
+    }
+  },
+  "mensagem": "Verificação realizada"
+}
+```
+
+**Resposta (paciente inadimplente):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "tem_cartao": true,
+    "status": "inadimplente",
+    "plano": "Individual",
+    "pode_usar_cartao": false,
+    "mensagem": "Paciente inadimplente. Regularizar situação para usar Cartão."
+  },
+  "mensagem": "Verificação realizada"
+}
+```
+
+**Resposta (sem cartão):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "tem_cartao": false,
+    "status": "nao_encontrado",
+    "plano": null,
+    "pode_usar_cartao": false,
+    "mensagem": "Paciente não possui Cartão de Desconto"
+  },
+  "mensagem": "Verificação realizada"
+}
+```
+
+---
+
+### Ordens de Serviço
+
+#### Criar Ordem de Serviço
+
+```
+POST /ordens-servico
+```
+
+Cria uma nova Ordem de Serviço. Auto-gera número da OS, senha de chamada, login e senha para consulta de resultados. Dispara webhook `ordem_servico.criada`.
+
+**Permissão:** `ordens_servico.write`
+
+**Body (JSON):**
+
+| Campo | Tipo | Obrigatório | Descrição |
+|-------|------|-------------|-----------|
+| `unit_id` | integer | Sim | ID da unidade |
+| `paciente_id` | integer | Sim | ID do paciente |
+| `convenio_id` | integer | Sim | ID do convênio |
+| `tipo_atendimento` | string | Sim | `consulta`, `exame`, `procedimento` ou `retorno` |
+| `procedimentos` | array | Sim | Lista de procedimentos (mín 1) |
+| `procedimentos[].procedimento_id` | integer | Sim | ID do procedimento |
+| `procedimentos[].quantidade` | number | Não | Quantidade (padrão: 1) |
+| `procedimentos[].valor_unitario` | number | Não | Valor unitário (padrão: valor da tabela) |
+| `procedimentos[].descricao` | string | Não | Descrição (padrão: nome do procedimento) |
+| `agendamento_id` | integer | Não | ID do agendamento a vincular |
+| `provider_id` | integer | Não | ID do profissional |
+| `prioridade` | string | Não | `normal` (padrão), `preferencial` ou `urgente` |
+| `observacoes` | string | Não | Observações (máx 1000 chars) |
+| `numero_carteira` | string | Não | Número da carteira do convênio |
+| `validade_carteira` | date | Não | Validade da carteira |
+
+**Exemplo:**
+```bash
+curl -X POST -H "X-API-Key: clk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "unit_id": 1,
+    "paciente_id": 42,
+    "convenio_id": 1,
+    "tipo_atendimento": "exame",
+    "agendamento_id": 18,
+    "procedimentos": [
+      { "procedimento_id": 10, "quantidade": 1, "valor_unitario": 25.00 }
+    ],
+    "observacoes": "Criado via WhatsApp"
+  }' \
+  "https://seu-dominio/api/v1/external/ordens-servico"
+```
+
+**Resposta (201):**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "id": 100,
+    "numero_os": "OS202603030001",
+    "status": "aguardando",
+    "tipo_atendimento": "exame",
+    "prioridade": "normal",
+    "data_os": "2026-03-03",
+    "hora_os": "10:30:00",
+    "senha_chamada": "N001",
+    "login_resultado": "OS202603030001",
+    "senha_resultado": "482917",
+    "valor_total": 25.00,
+    "observacoes": "Criado via WhatsApp",
+    "paciente": {
+      "id": 42,
+      "name": "João da Silva",
+      "cpf": "98765432100",
+      "phone": "(84) 99999-1234"
+    },
+    "convenio": { "id": 1, "nome": "Particular" },
+    "unidade": { "id": 1, "name": "Mossoró" },
+    "procedimentos": [
+      {
+        "id": 201,
+        "procedure_id": 10,
+        "descricao": "Hemograma Completo",
+        "quantidade": 1.0,
+        "valor_unitario": 25.00,
+        "valor_total": 25.00
+      }
+    ],
+    "agendamento_id": 18
+  },
+  "mensagem": "Ordem de Serviço criada com sucesso"
+}
+```
+
+**Erros possíveis (422):**
+
+| Mensagem | Causa |
+|----------|-------|
+| `Agendamento não pertence a este paciente` | paciente_id diverge do agendamento |
+| `Este agendamento já possui uma Ordem de Serviço vinculada` | OS já criada para o agendamento |
+
+---
+
+#### Ver Ordem de Serviço
+
+```
+GET /ordens-servico/{id}
+```
+
+Retorna dados completos de uma Ordem de Serviço, incluindo paciente, convênio, procedimentos e status do atendimento.
+
+**Permissão:** `ordens_servico.read`
+
+**Exemplo:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "https://seu-dominio/api/v1/external/ordens-servico/100"
+```
+
+**Resposta:**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "id": 100,
+    "numero_os": "OS202603030001",
+    "status": "aguardando",
+    "tipo_atendimento": "exame",
+    "prioridade": "normal",
+    "data_os": "2026-03-03",
+    "hora_os": "10:30:00",
+    "senha_chamada": "N001",
+    "login_resultado": "OS202603030001",
+    "senha_resultado": "482917",
+    "valor_total": 25.00,
+    "valor_desconto": 0.00,
+    "observacoes": "Criado via WhatsApp",
+    "data_hora_chegada": null,
+    "data_hora_chamada": null,
+    "data_hora_inicio": null,
+    "data_hora_fim": null,
+    "paciente": {
+      "id": 42,
+      "name": "João da Silva",
+      "cpf": "98765432100",
+      "phone": "(84) 99999-1234"
+    },
+    "convenio": { "id": 1, "nome": "Particular" },
+    "unidade": { "id": 1, "name": "Mossoró" },
+    "profissional": null,
+    "procedimentos": [
+      {
+        "id": 201,
+        "procedure_id": 10,
+        "descricao": "Hemograma Completo",
+        "quantidade": 1.0,
+        "valor_unitario": 25.00,
+        "valor_total": 25.00,
+        "tipo_item": "procedimento",
+        "procedimento": {
+          "id": 10,
+          "nome": "Hemograma Completo",
+          "codigo_tuss": "40304361"
+        }
+      }
+    ]
+  },
+  "mensagem": "Ordem de Serviço encontrada"
+}
+```
+
+---
+
 ## Webhooks
 
 Webhooks permitem receber notificações em tempo real quando eventos ocorrem.
@@ -733,6 +1146,7 @@ Webhooks são configurados por API Key pelo administrador do sistema (via banco 
 | `agendamento.criado` | Novo agendamento criado via API |
 | `agendamento.confirmado` | Agendamento confirmado via API |
 | `agendamento.cancelado` | Agendamento cancelado via API |
+| `ordem_servico.criada` | Nova Ordem de Serviço criada via API |
 
 ### Formato da Requisição
 
@@ -824,6 +1238,9 @@ Cada API Key possui um conjunto de permissões que controla o acesso aos endpoin
 | `agendamentos.read` | `GET /agendamentos/{id}`, `GET /pacientes/{id}/agendamentos` |
 | `agendamentos.write` | `POST /agendamentos`, `PUT /agendamentos/{id}/confirmar`, `PUT /agendamentos/{id}/cancelar` |
 | `convenios.read` | `GET /convenios` |
+| `valores.read` | `GET /procedimentos/valores`, `GET /cartao-desconto/verificar` |
+| `ordens_servico.read` | `GET /ordens-servico/{id}` |
+| `ordens_servico.write` | `POST /ordens-servico` |
 | `*` | Acesso total a todos os endpoints |
 
 ### Exemplos de configuração:
@@ -872,13 +1289,19 @@ php artisan apikey:manage create --name="Bot Agendamento" \
    POST /pacientes { name, phone, birth_date, gender }
 4. Bot lista agendas disponíveis:
    GET /agendas?tipo=consulta
-5. Bot consulta disponibilidade da agenda escolhida:
+5. Bot consulta valores do procedimento (particular + cartão desconto):
+   GET /procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910
+6. Bot verifica cartão de desconto do paciente:
+   GET /cartao-desconto/verificar?cpf=12345678910
+7. Bot mostra preços ao paciente e consulta disponibilidade:
    GET /agendas/1/disponibilidade?data=2026-03-10
-6. Bot cria o agendamento:
+8. Bot cria o agendamento:
    POST /agendamentos { agenda_id, paciente_id, data_agendamento, hora_agendamento }
-7. Sistema dispara webhook → Bot confirma ao paciente
-8. No dia anterior, bot confirma:
-   PUT /agendamentos/18/confirmar
+9. No dia do atendimento, bot cria a Ordem de Serviço:
+   POST /ordens-servico { unit_id, paciente_id, convenio_id, procedimentos, agendamento_id }
+10. Sistema dispara webhook ordem_servico.criada → Bot informa dados ao paciente
+11. No dia anterior, bot confirma:
+    PUT /agendamentos/18/confirmar
 ```
 
 ### Python — Exemplo Completo
