@@ -1,6 +1,6 @@
-# API Externa de Agendamentos - Clínica Oitava Rosado
+# API Externa - Clínica Oitava Rosado
 
-API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros) com o módulo de agendamentos da clínica.
+API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros) com os módulos de agendamentos, valores de procedimentos, cartão de desconto e ordens de serviço da clínica.
 
 ## Visão Geral
 
@@ -874,6 +874,7 @@ curl -H "X-API-Key: clk_..." \
   },
   "mensagem": "Valores consultados com sucesso"
 }
+```
 
 **Campo `origem_valor`:**
 
@@ -881,7 +882,6 @@ curl -H "X-API-Key: clk_..." \
 |-------|-------------|
 | `tabela_negociacao` | Valor encontrado na tabela de negociação do convênio |
 | `tabela_procedimento` | Fallback: valor padrão do procedimento (sem tabela de negociação) |
-```
 
 ---
 
@@ -1249,14 +1249,23 @@ Cada API Key possui um conjunto de permissões que controla o acesso aos endpoin
 # Acesso total
 php artisan apikey:manage create --name="Bot WhatsApp" --permissions="*"
 
-# Apenas leitura
+# Apenas leitura (agendas, pacientes, convênios, valores)
 php artisan apikey:manage create --name="Bot Consulta" \
-  --permissions="agendas.read" --permissions="pacientes.read" --permissions="convenios.read"
+  --permissions="agendas.read" --permissions="pacientes.read" \
+  --permissions="convenios.read" --permissions="valores.read"
 
-# Leitura + agendamento
+# Leitura + agendamento + valores
 php artisan apikey:manage create --name="Bot Agendamento" \
   --permissions="agendas.read" --permissions="pacientes.read" --permissions="pacientes.write" \
-  --permissions="agendamentos.read" --permissions="agendamentos.write" --permissions="convenios.read"
+  --permissions="agendamentos.read" --permissions="agendamentos.write" \
+  --permissions="convenios.read" --permissions="valores.read"
+
+# Fluxo completo: agendamento + OS + valores
+php artisan apikey:manage create --name="Bot Completo" \
+  --permissions="agendas.read" --permissions="pacientes.read" --permissions="pacientes.write" \
+  --permissions="agendamentos.read" --permissions="agendamentos.write" \
+  --permissions="convenios.read" --permissions="valores.read" \
+  --permissions="ordens_servico.read" --permissions="ordens_servico.write"
 ```
 
 ---
@@ -1283,25 +1292,24 @@ php artisan apikey:manage create --name="Bot Agendamento" \
 
 ```
 1. Paciente envia mensagem → Bot identifica intenção de agendar
-2. Bot busca paciente por CPF/telefone
-   GET /pacientes/buscar?telefone=84999991234
+2. Bot busca paciente por CPF/telefone:
+   GET /pacientes/buscar?cpf=12345678910
 3. Se não encontrar, cadastra:
-   POST /pacientes { name, phone, birth_date, gender }
+   POST /pacientes { name, phone, birth_date, gender, cpf }
 4. Bot lista agendas disponíveis:
    GET /agendas?tipo=consulta
-5. Bot consulta valores do procedimento (particular + cartão desconto):
+5. Bot consulta valores do procedimento (tabela negociação + cartão desconto):
    GET /procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910
-6. Bot verifica cartão de desconto do paciente:
-   GET /cartao-desconto/verificar?cpf=12345678910
-7. Bot mostra preços ao paciente e consulta disponibilidade:
+6. Bot mostra preços ao paciente e consulta disponibilidade:
    GET /agendas/1/disponibilidade?data=2026-03-10
-8. Bot cria o agendamento:
+7. Bot cria o agendamento:
    POST /agendamentos { agenda_id, paciente_id, data_agendamento, hora_agendamento }
-9. No dia do atendimento, bot cria a Ordem de Serviço:
-   POST /ordens-servico { unit_id, paciente_id, convenio_id, procedimentos, agendamento_id }
-10. Sistema dispara webhook ordem_servico.criada → Bot informa dados ao paciente
-11. No dia anterior, bot confirma:
-    PUT /agendamentos/18/confirmar
+8. Sistema dispara webhook agendamento.criado → Bot confirma ao paciente
+9. No dia anterior, bot confirma presença:
+   PUT /agendamentos/18/confirmar
+10. No dia do atendimento, bot/sistema cria a Ordem de Serviço:
+    POST /ordens-servico { unit_id, paciente_id, convenio_id, procedimentos, agendamento_id }
+11. Sistema dispara webhook ordem_servico.criada → Bot informa senha e dados ao paciente
 ```
 
 ### Python — Exemplo Completo
@@ -1315,6 +1323,8 @@ HEADERS = {
     "X-API-Key": API_KEY,
     "Content-Type": "application/json"
 }
+
+CONVENIO_PARTICULAR_ID = 2  # ID do convênio Particular da unidade
 
 # 1. Buscar paciente
 resp = requests.get(f"{BASE_URL}/pacientes/buscar",
@@ -1334,15 +1344,28 @@ if not pacientes:
 else:
     paciente_id = pacientes[0]["id"]
 
-# 3. Consultar disponibilidade
+# 3. Consultar valores dos procedimentos (tabela negociação + cartão desconto)
+resp = requests.get(f"{BASE_URL}/procedimentos/valores", headers=HEADERS, params={
+    "procedure_ids[]": [10, 15],
+    "convenio_id": CONVENIO_PARTICULAR_ID,
+    "cpf": "12345678910"
+})
+valores = resp.json()["dados"]["procedimentos"]
+for proc in valores:
+    print(f"{proc['nome']}: R$ {proc['valor_negociado']}")
+    if proc["cartao_desconto"] and proc["cartao_desconto"]["tem_cartao"]:
+        pix = proc["cartao_desconto"]["valores"]["pix"]
+        print(f"  Com cartão (PIX): R$ {pix['valor_final']} ({pix['desconto_percentual']}% off)")
+
+# 4. Consultar disponibilidade
 resp = requests.get(f"{BASE_URL}/agendas/1/disponibilidade",
     headers=HEADERS, params={"data": "2026-03-10"})
 disp = resp.json()["dados"]
 
-# 4. Pegar primeiro horário disponível
+# 5. Pegar primeiro horário disponível
 horario = next(s["horario"] for s in disp["slots"] if s["status"] == "disponivel")
 
-# 5. Criar agendamento
+# 6. Criar agendamento
 resp = requests.post(f"{BASE_URL}/agendamentos", headers=HEADERS, json={
     "agenda_id": 1,
     "paciente_id": paciente_id,
@@ -1351,6 +1374,22 @@ resp = requests.post(f"{BASE_URL}/agendamentos", headers=HEADERS, json={
 })
 agendamento = resp.json()["dados"]
 print(f"Agendamento {agendamento['numero']} criado para {agendamento['hora']}")
+
+# 7. No dia do atendimento: criar Ordem de Serviço
+resp = requests.post(f"{BASE_URL}/ordens-servico", headers=HEADERS, json={
+    "unit_id": 1,
+    "paciente_id": paciente_id,
+    "convenio_id": CONVENIO_PARTICULAR_ID,
+    "tipo_atendimento": "exame",
+    "agendamento_id": agendamento["id"],
+    "procedimentos": [
+        {"procedimento_id": 10, "quantidade": 1, "valor_unitario": 90.00}
+    ],
+    "observacoes": "Criado via WhatsApp"
+})
+os = resp.json()["dados"]
+print(f"OS {os['numero_os']} criada — Senha: {os['senha_chamada']}")
+print(f"Resultado: login={os['login_resultado']} senha={os['senha_resultado']}")
 ```
 
 ### JavaScript/Node.js — Exemplo
@@ -1358,43 +1397,73 @@ print(f"Agendamento {agendamento['numero']} criado para {agendamento['hora']}")
 ```javascript
 const API_KEY = 'clk_sua_chave_aqui';
 const BASE_URL = 'https://seu-dominio/api/v1/external';
+const CONVENIO_PARTICULAR_ID = 2;
 
 const headers = {
   'X-API-Key': API_KEY,
   'Content-Type': 'application/json'
 };
 
-async function agendarConsulta(cpf, agendaId, data) {
+// Consultar valores com cartão de desconto
+async function consultarValores(procedureIds, cpf) {
+  const params = new URLSearchParams({ convenio_id: CONVENIO_PARTICULAR_ID });
+  procedureIds.forEach(id => params.append('procedure_ids[]', id));
+  if (cpf) params.append('cpf', cpf);
+
+  const resp = await fetch(`${BASE_URL}/procedimentos/valores?${params}`, { headers });
+  const { dados } = await resp.json();
+  return dados.procedimentos;
+}
+
+// Fluxo completo: agendar + criar OS
+async function agendarECriarOS(cpf, agendaId, data, procedureIds) {
   // Buscar paciente
   const busca = await fetch(`${BASE_URL}/pacientes/buscar?cpf=${cpf}`, { headers });
   const { dados: pacientes } = await busca.json();
+  if (!pacientes.length) throw new Error('Paciente não encontrado');
+  const pacienteId = pacientes[0].id;
 
-  if (!pacientes.length) {
-    throw new Error('Paciente não encontrado');
-  }
+  // Consultar valores
+  const valores = await consultarValores(procedureIds, cpf);
 
   // Consultar disponibilidade
   const disp = await fetch(
     `${BASE_URL}/agendas/${agendaId}/disponibilidade?data=${data}`, { headers }
   );
   const { dados: disponibilidade } = await disp.json();
-
   const horario = disponibilidade.slots?.find(s => s.status === 'disponivel');
   if (!horario) throw new Error('Sem horários disponíveis');
 
   // Criar agendamento
-  const resp = await fetch(`${BASE_URL}/agendamentos`, {
-    method: 'POST',
-    headers,
+  const agResp = await fetch(`${BASE_URL}/agendamentos`, {
+    method: 'POST', headers,
     body: JSON.stringify({
       agenda_id: agendaId,
-      paciente_id: pacientes[0].id,
+      paciente_id: pacienteId,
       data_agendamento: data,
       hora_agendamento: horario.horario
     })
   });
+  const agendamento = (await agResp.json()).dados;
 
-  return await resp.json();
+  // Criar Ordem de Serviço
+  const osResp = await fetch(`${BASE_URL}/ordens-servico`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      unit_id: 1,
+      paciente_id: pacienteId,
+      convenio_id: CONVENIO_PARTICULAR_ID,
+      tipo_atendimento: 'exame',
+      agendamento_id: agendamento.id,
+      procedimentos: valores.map(v => ({
+        procedimento_id: v.id,
+        quantidade: 1,
+        valor_unitario: v.valor_negociado
+      }))
+    })
+  });
+
+  return { agendamento, os: (await osResp.json()).dados, valores };
 }
 ```
 
@@ -1439,6 +1508,8 @@ php artisan apikey:manage revoke --key-id=1
 
 API Keys podem ser vinculadas a uma unidade específica (parâmetro `--unit-id`). Quando vinculada:
 - `GET /agendas` retorna apenas agendas da unidade
+- `GET /ordens-servico/{id}` retorna apenas OS da unidade
+- `POST /ordens-servico` só permite criar OS na unidade da chave
 - Demais endpoints não são filtrados (pacientes e convênios são globais)
 
 ---
