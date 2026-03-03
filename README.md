@@ -6,11 +6,37 @@ API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros
 
 | Item | Detalhe |
 |------|---------|
-| **Base URL** | `https://{seu-dominio}/api/v1/external` |
+| **Base URL** | `http://157.230.177.71:8000/api/v1/external` |
 | **Autenticação** | API Key via header `X-API-Key` |
 | **Formato** | JSON |
 | **Rate Limit** | 60 requisições/minuto (configurável por chave) |
 | **Webhooks** | Notificações automáticas via POST (HMAC-SHA256) |
+
+### Credenciais de Teste
+
+**API Key:**
+
+| Item | Valor |
+|------|-------|
+| **API Key** | `clk_2b194b51793b46fbc3836124fc0a903ef011742b39e72d95dc91d314b5269957` |
+| **Nome da Key** | Bot Teste |
+| **Permissões** | `*` (acesso total) |
+| **Rate Limit** | 120 req/min |
+
+**Usuário do Sistema (acesso ao painel web):**
+
+| Item | Valor |
+|------|-------|
+| **Email** | `integracao@clinica.com` |
+| **Senha** | `Integracao@2026` |
+| **Perfil** | Integração |
+| **Acesso** | Apenas módulo de agenda (dashboard, agendamentos, pacientes visualização) |
+
+**Teste rápido:**
+```bash
+curl -H "X-API-Key: clk_2b194b51793b46fbc3836124fc0a903ef011742b39e72d95dc91d314b5269957" \
+  http://157.230.177.71:8000/api/v1/external/agendas
+```
 
 ## Índice
 
@@ -35,8 +61,8 @@ API REST para integração de sistemas externos (bots de WhatsApp, IA, parceiros
 Todas as requisições devem incluir o header `X-API-Key` com uma chave válida.
 
 ```bash
-curl -H "X-API-Key: clk_sua_chave_aqui" \
-  https://seu-dominio/api/v1/external/agendas
+curl -H "X-API-Key: clk_2b194b51793b46fbc3836124fc0a903ef011742b39e72d95dc91d314b5269957" \
+  http://157.230.177.71:8000/api/v1/external/agendas
 ```
 
 ### Obter uma API Key
@@ -107,7 +133,7 @@ Retorna todas as agendas ativas (consultas e procedimentos).
 **Exemplo:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/agendas?tipo=consulta"
+  "http://157.230.177.71:8000/api/v1/external/agendas?tipo=consulta"
 ```
 
 **Resposta:**
@@ -214,7 +240,7 @@ Retorna os horários disponíveis para uma data específica.
 **Exemplo:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/agendas/1/disponibilidade?data=2026-03-10"
+  "http://157.230.177.71:8000/api/v1/external/agendas/1/disponibilidade?data=2026-03-10"
 ```
 
 **Resposta (agenda normal com slots fixos):**
@@ -297,15 +323,15 @@ Busca pacientes por CPF, telefone ou nome. Informe **pelo menos um** filtro.
 ```bash
 # Por CPF
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/pacientes/buscar?cpf=12345678910"
+  "http://157.230.177.71:8000/api/v1/external/pacientes/buscar?cpf=12345678910"
 
 # Por telefone
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/pacientes/buscar?telefone=84987654321"
+  "http://157.230.177.71:8000/api/v1/external/pacientes/buscar?telefone=84987654321"
 
 # Por nome
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/pacientes/buscar?nome=Maria"
+  "http://157.230.177.71:8000/api/v1/external/pacientes/buscar?nome=Maria"
 ```
 
 **Resposta:**
@@ -363,7 +389,7 @@ curl -X POST -H "X-API-Key: clk_..." \
     "gender": "M",
     "cpf": "98765432100"
   }' \
-  "https://seu-dominio/api/v1/external/pacientes"
+  "http://157.230.177.71:8000/api/v1/external/pacientes"
 ```
 
 **Resposta (201):**
@@ -514,7 +540,7 @@ curl -X POST -H "X-API-Key: clk_..." \
     "convenio_id": 1,
     "tipo_consulta": "primeira_vez"
   }' \
-  "https://seu-dominio/api/v1/external/agendamentos"
+  "http://157.230.177.71:8000/api/v1/external/agendamentos"
 ```
 
 **Exemplo — Reserva de horário (sem paciente cadastrado):**
@@ -528,7 +554,7 @@ curl -X POST -H "X-API-Key: clk_..." \
     "data_agendamento": "2026-03-10",
     "observacoes": "Agendado via WhatsApp"
   }' \
-  "https://seu-dominio/api/v1/external/agendamentos"
+  "http://157.230.177.71:8000/api/v1/external/agendamentos"
 ```
 
 **Resposta (201):**
@@ -608,7 +634,7 @@ Marca o agendamento como confirmado. Dispara webhook `agendamento.confirmado`.
 **Exemplo:**
 ```bash
 curl -X PUT -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/agendamentos/18/confirmar"
+  "http://157.230.177.71:8000/api/v1/external/agendamentos/18/confirmar"
 ```
 
 **Resposta:**
@@ -648,7 +674,7 @@ Cancela o agendamento. Dispara webhook `agendamento.cancelado`.
 curl -X PUT -H "X-API-Key: clk_..." \
   -H "Content-Type: application/json" \
   -d '{"motivo": "Paciente solicitou cancelamento via WhatsApp"}' \
-  "https://seu-dominio/api/v1/external/agendamentos/18/cancelar"
+  "http://157.230.177.71:8000/api/v1/external/agendamentos/18/cancelar"
 ```
 
 **Resposta:**
@@ -689,11 +715,11 @@ Lista convênios ativos. Opcionalmente filtrados por agenda.
 ```bash
 # Todos os convênios
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/convenios"
+  "http://157.230.177.71:8000/api/v1/external/convenios"
 
 # Convênios de uma agenda específica
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/convenios?agenda_id=1"
+  "http://157.230.177.71:8000/api/v1/external/convenios?agenda_id=1"
 ```
 
 **Resposta:**
@@ -755,7 +781,7 @@ Se CPF informado, verifica se o paciente tem Cartão de Desconto ativo e se o pl
 **Exemplo — Somente valores negociados:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/procedimentos/valores?procedure_ids[]=10&procedure_ids[]=15&convenio_id=2"
+  "http://157.230.177.71:8000/api/v1/external/procedimentos/valores?procedure_ids[]=10&procedure_ids[]=15&convenio_id=2"
 ```
 
 **Resposta:**
@@ -803,7 +829,7 @@ curl -H "X-API-Key: clk_..." \
 **Exemplo — Com cartão de desconto:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910"
+  "http://157.230.177.71:8000/api/v1/external/procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910"
 ```
 
 **Resposta (paciente com cartão ativo e plano aceito):**
@@ -943,7 +969,7 @@ Verifica o status do cartão de desconto de um paciente por CPF. Consulta base l
 **Exemplo:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/cartao-desconto/verificar?cpf=12345678910"
+  "http://157.230.177.71:8000/api/v1/external/cartao-desconto/verificar?cpf=12345678910"
 ```
 
 **Resposta (paciente com cartão ativo):**
@@ -1045,7 +1071,7 @@ curl -X POST -H "X-API-Key: clk_..." \
     ],
     "observacoes": "Criado via WhatsApp"
   }' \
-  "https://seu-dominio/api/v1/external/ordens-servico"
+  "http://157.230.177.71:8000/api/v1/external/ordens-servico"
 ```
 
 **Resposta (201):**
@@ -1111,7 +1137,7 @@ Retorna dados completos de uma Ordem de Serviço, incluindo paciente, convênio,
 **Exemplo:**
 ```bash
 curl -H "X-API-Key: clk_..." \
-  "https://seu-dominio/api/v1/external/ordens-servico/100"
+  "http://157.230.177.71:8000/api/v1/external/ordens-servico/100"
 ```
 
 **Resposta:**
@@ -1354,8 +1380,8 @@ php artisan apikey:manage create --name="Bot Completo" \
 ```python
 import requests
 
-API_KEY = "clk_sua_chave_aqui"
-BASE_URL = "https://seu-dominio/api/v1/external"
+API_KEY = "clk_2b194b51793b46fbc3836124fc0a903ef011742b39e72d95dc91d314b5269957"
+BASE_URL = "http://157.230.177.71:8000/api/v1/external"
 HEADERS = {
     "X-API-Key": API_KEY,
     "Content-Type": "application/json"
@@ -1434,8 +1460,8 @@ print(f"Resultado: login={os['login_resultado']} senha={os['senha_resultado']}")
 ### JavaScript/Node.js — Exemplo
 
 ```javascript
-const API_KEY = 'clk_sua_chave_aqui';
-const BASE_URL = 'https://seu-dominio/api/v1/external';
+const API_KEY = 'clk_2b194b51793b46fbc3836124fc0a903ef011742b39e72d95dc91d314b5269957';
+const BASE_URL = 'http://157.230.177.71:8000/api/v1/external';
 const CONVENIO_PARTICULAR_ID = 2;
 
 const headers = {
