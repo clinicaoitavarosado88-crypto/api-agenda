@@ -754,7 +754,7 @@ curl -H "X-API-Key: clk_..." \
 GET /procedimentos/valores
 ```
 
-Retorna os valores dos procedimentos da **tabela de negociação** do convênio particular. Os valores já vêm definidos por forma de pagamento (dinheiro, pix, cartão débito, cartão à vista, cartão parcelado).
+Retorna os valores dos procedimentos com lógica de prioridade em cascata. Os valores já vêm definidos por forma de pagamento (dinheiro, pix, cartão débito, cartão à vista, cartão parcelado).
 
 A resposta possui duas seções:
 - **`valores_sem_plano`** — valores para pacientes **SEM** Cartão de Desconto
@@ -762,23 +762,79 @@ A resposta possui duas seções:
 
 Se CPF informado, verifica se o paciente tem Cartão de Desconto ativo e se o plano é aceito para o procedimento.
 
-> **Importante:** Use o `convenio_id` do convênio **Particular** da unidade desejada. Valores de plano de saúde **NÃO** devem ser consultados por este endpoint.
-
 **Permissão:** `valores.read`
 
-**Fonte dos valores:**
-1. `convenio_procedimentos` (tabela de negociação) — campo `payment_structure` com valores por forma de pagamento nas seções `sem_plano` e `planos`
-2. `Procedure.value` — fallback quando o procedimento não está na tabela de negociação
+**Hierarquia de preços (prioridade):**
+
+| Prioridade | Fonte | Descrição |
+|------------|-------|-----------|
+| 1 (maior) | `valor_medico_procedimento` | Valor negociado do médico para **este procedimento específico** |
+| 2 | `valor_medico_especialidade` | Valor negociado do médico para a **especialidade** (vale para todos os procedimentos da especialidade) |
+| 3 | `tabela_negociacao` | Valor da tabela de negociação do convênio |
+| 4 (menor) | `tabela_procedimento` | Valor base cadastrado no procedimento |
+
+> **Nota:** Para obter valores específicos do médico (prioridades 1 e 2), informe o `provider_id`. Sem ele, retorna apenas valores da tabela de negociação ou do procedimento.
 
 **Parâmetros de Query:**
 
 | Parâmetro | Tipo | Obrigatório | Descrição |
 |-----------|------|-------------|-----------|
 | `procedure_ids[]` | integer[] | Sim | IDs dos procedimentos (máx 50) |
-| `convenio_id` | integer | Sim | ID do convênio (particular da unidade) |
+| `convenio_id` | integer | Sim | ID do convênio |
+| `provider_id` | integer | Não | ID do médico (para buscar valores negociados do prestador) |
 | `cpf` | string | Não | CPF do paciente para verificar cartão de desconto |
 
-**Exemplo — Somente valores negociados:**
+**Exemplo — Valores com médico específico:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "http://157.230.177.71:8000/api/v1/external/procedimentos/valores?procedure_ids[]=10&procedure_ids[]=15&convenio_id=6&provider_id=11"
+```
+
+**Resposta:**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "procedimentos": [
+      {
+        "id": 10,
+        "nome": "Ultrassonografia Abdominal",
+        "codigo_tuss": "40901017",
+        "valor_negociado": 350.00,
+        "origem_valor": "valor_medico_procedimento",
+        "valores_sem_plano": {
+          "dinheiro": 350.00,
+          "pix": 340.00,
+          "cartao_debito": 360.00,
+          "cartao_avista": 360.00,
+          "cartao_parcelado": 380.00
+        },
+        "cartao_desconto": null
+      },
+      {
+        "id": 15,
+        "nome": "Hemograma Completo",
+        "codigo_tuss": "40304361",
+        "valor_negociado": 200.00,
+        "origem_valor": "valor_medico_especialidade",
+        "valores_sem_plano": {
+          "dinheiro": 200.00,
+          "pix": 190.00,
+          "cartao_debito": 210.00,
+          "cartao_avista": 210.00,
+          "cartao_parcelado": 220.00
+        },
+        "cartao_desconto": null
+      }
+    ]
+  },
+  "mensagem": "Valores consultados com sucesso"
+}
+```
+
+> No exemplo acima, o procedimento 10 tem valor específico do médico (`valor_medico_procedimento`), enquanto o 15 usa o valor padrão do médico para a especialidade (`valor_medico_especialidade`).
+
+**Exemplo — Sem médico (apenas tabela de negociação):**
 ```bash
 curl -H "X-API-Key: clk_..." \
   "http://157.230.177.71:8000/api/v1/external/procedimentos/valores?procedure_ids[]=10&procedure_ids[]=15&convenio_id=2"
@@ -945,8 +1001,72 @@ curl -H "X-API-Key: clk_..." \
 
 | Valor | Significado |
 |-------|-------------|
-| `tabela_negociacao` | Valor encontrado na tabela de negociação do convênio |
-| `tabela_procedimento` | Fallback: valor padrão do procedimento (sem tabela de negociação) |
+| `valor_medico_procedimento` | Valor negociado do médico especificamente para este procedimento |
+| `valor_medico_especialidade` | Valor negociado do médico para a especialidade (padrão para todos os procedimentos) |
+| `tabela_negociacao` | Valor da tabela de negociação do convênio |
+| `tabela_procedimento` | Fallback: valor base cadastrado no procedimento |
+
+---
+
+#### Consultar Valores de Consulta
+
+```
+GET /consultas/valores
+```
+
+Retorna o valor da consulta médica para uma especialidade e convênio. Localiza automaticamente o procedimento de consulta vinculado à especialidade (fallback para consulta médica genérica). Usa a mesma hierarquia de prioridade de valores.
+
+**Permissão:** `valores.read`
+
+**Parâmetros de Query:**
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+|-----------|------|-------------|-----------|
+| `specialty_id` | integer | Sim | ID da especialidade |
+| `convenio_id` | integer | Sim | ID do convênio |
+| `provider_id` | integer | Não | ID do médico (para valores negociados) |
+| `cpf` | string | Não | CPF do paciente (para cartão de desconto) |
+
+**Exemplo:**
+```bash
+curl -H "X-API-Key: clk_..." \
+  "http://157.230.177.71:8000/api/v1/external/consultas/valores?specialty_id=5&convenio_id=6&provider_id=11"
+```
+
+**Resposta:**
+```json
+{
+  "sucesso": true,
+  "dados": {
+    "especialidade": {
+      "id": 5,
+      "nome": "Cardiologia"
+    },
+    "consultas": [
+      {
+        "procedure_id": 39,
+        "nome": "Consulta em Cardiologia",
+        "codigo_tuss": "10101012",
+        "valor_negociado": 300.00,
+        "origem_valor": "valor_medico_especialidade",
+        "valores_sem_plano": {
+          "dinheiro": 300.00,
+          "pix": 290.00,
+          "cartao_debito": 310.00,
+          "cartao_avista": 310.00,
+          "cartao_parcelado": 320.00
+        },
+        "cartao_desconto": null
+      }
+    ]
+  },
+  "mensagem": "Valores de consulta encontrados"
+}
+```
+
+> **Dica para bots:** Use este endpoint quando o paciente perguntar "quanto custa uma consulta com cardiologista?". Basta informar a `specialty_id` e opcionalmente o `provider_id` do médico para obter o valor exato.
+
+**Erros:** `404` se nenhum procedimento de consulta encontrado para a especialidade.
 
 ---
 
@@ -1301,7 +1421,7 @@ Cada API Key possui um conjunto de permissões que controla o acesso aos endpoin
 | `agendamentos.read` | `GET /agendamentos/{id}`, `GET /pacientes/{id}/agendamentos` |
 | `agendamentos.write` | `POST /agendamentos`, `PUT /agendamentos/{id}/confirmar`, `PUT /agendamentos/{id}/cancelar` |
 | `convenios.read` | `GET /convenios` |
-| `valores.read` | `GET /procedimentos/valores`, `GET /cartao-desconto/verificar` |
+| `valores.read` | `GET /procedimentos/valores`, `GET /consultas/valores`, `GET /cartao-desconto/verificar` |
 | `ordens_servico.read` | `GET /ordens-servico/{id}` |
 | `ordens_servico.write` | `POST /ordens-servico` |
 | `*` | Acesso total a todos os endpoints |
@@ -1349,20 +1469,70 @@ php artisan apikey:manage create --name="Bot Completo" \
 
 ---
 
+## Como o Bot Mapeia Nomes para IDs
+
+O bot **não precisa decorar IDs**. Ele consulta a API para descobrir os IDs a partir de nomes/texto do paciente.
+
+### Fluxo de Descoberta
+
+```
+Paciente diz: "quero marcar consulta com cardiologista em Mossoró"
+
+1. Bot extrai: especialidade="cardiologia", cidade="Mossoró", tipo="consulta"
+
+2. Bot lista agendas filtrando por tipo:
+   GET /agendas?tipo=consulta
+   → Resposta inclui todas as agendas de consulta com:
+     - provider.name = "Dra. Maria Santos"
+     - specialties = [{"id": 5, "name": "Cardiologia"}]
+     - unit.name = "Mossoró"
+   → Bot filtra pelo texto do paciente e encontra agenda_id=1, specialty_id=5, provider_id=11
+
+3. Bot lista convênios da agenda:
+   GET /convenios?agenda_id=1
+   → Resposta: [{"id": 6, "nome": "Particular"}, {"id": 3, "nome": "Unimed"}]
+   → Bot pergunta ao paciente qual convênio, ou usa Particular por padrão
+
+4. Bot consulta valor:
+   GET /consultas/valores?specialty_id=5&convenio_id=6&provider_id=11
+   → Já tem todos os IDs necessários!
+```
+
+### Mapeamento Automático por Texto
+
+O bot pode fazer cache das agendas e convênios no início da sessão:
+
+```
+GET /agendas → Lista completa com nomes de médicos, especialidades e unidades
+GET /convenios → Lista de todos os convênios com nomes
+```
+
+Com isso, o bot consegue mapear qualquer texto do paciente para os IDs corretos:
+- "cardio" → specialty_id=5 (match parcial em "Cardiologia")
+- "Dra. Maria" → provider_id=11 (match parcial em "Dra. Maria Santos")
+- "Mossoró" → filtra agendas com unit.name="Mossoró"
+- "Particular" → convenio_id=6
+
+> **Dica:** Se a API Key estiver vinculada a uma unidade (ex: Mossoró), o `GET /agendas` já retorna apenas agendas daquela unidade, simplificando a busca.
+
+---
+
 ## Exemplos de Integração
 
 ### Fluxo Completo: Bot de WhatsApp
 
 ```
+Exemplo: Paciente diz "quero marcar consulta com cardiologista em Mossoró"
+
 1. Paciente envia mensagem → Bot identifica intenção de agendar
 2. Bot busca paciente por CPF/telefone:
    GET /pacientes/buscar?cpf=12345678910
 3. Se não encontrar, cadastra:
    POST /pacientes { name, phone, birth_date, gender, cpf }
-4. Bot lista agendas disponíveis:
-   GET /agendas?tipo=consulta
-5. Bot consulta valores do procedimento (tabela negociação + cartão desconto):
-   GET /procedimentos/valores?procedure_ids[]=10&convenio_id=2&cpf=12345678910
+4. Bot lista agendas de consulta em cardiologia:
+   GET /agendas?tipo=consulta&specialty_id=5
+5. Bot consulta valor da consulta com o médico da agenda:
+   GET /consultas/valores?specialty_id=5&convenio_id=6&provider_id=11&cpf=12345678910
 6. Bot mostra preços ao paciente e consulta disponibilidade:
    GET /agendas/1/disponibilidade?data=2026-03-10
 7. Bot cria o agendamento:
@@ -1373,6 +1543,18 @@ php artisan apikey:manage create --name="Bot Completo" \
 10. No dia do atendimento, bot/sistema cria a Ordem de Serviço:
     POST /ordens-servico { unit_id, paciente_id, convenio_id, procedimentos, agendamento_id }
 11. Sistema dispara webhook ordem_servico.criada → Bot informa senha e dados ao paciente
+```
+
+```
+Exemplo: Paciente diz "quanto custa uma ultrassom abdominal?"
+
+1. Bot consulta valores do procedimento (com médico e cartão desconto):
+   GET /procedimentos/valores?procedure_ids[]=10&convenio_id=6&provider_id=11&cpf=12345678910
+2. Bot verifica resposta:
+   - valores_sem_plano.pix = R$ 340,00 (sem cartão, pagando com PIX)
+   - cartao_desconto.valores.pix = R$ 280,00 (com cartão, pagando com PIX)
+   - origem_valor = "valor_medico_procedimento" (valor específico deste médico)
+3. Bot responde ao paciente com os valores disponíveis
 ```
 
 ### Python — Exemplo Completo
